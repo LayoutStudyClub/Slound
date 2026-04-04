@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Tilt Type</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  html, body { background: #111; }
+  .letter { color: #f0f0f0; }
+  #controls { background: #1a1a1a; border-top-color: #333; }
+  #text-input { background: #222; color: #f0f0f0; border-color: #444; }
+  .ctrl-btn { background: #222; color: #ccc; border-color: #444; }
+  #hint { color: #555; }
+}
+#canvas-area {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  bottom: 72px;
+  overflow: hidden;
+}
+.letter {
+  position: absolute;
+  font-weight: 600;
+  color: #111;
+  user-select: none;
+  pointer-events: none;
+  line-height: 1;
+}
+#controls {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 72px;
+  padding: 10px 12px;
+  border-top: 1px solid #e0e0e0;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#text-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #fff;
+  color: #111;
+  outline: none;
+  -webkit-appearance: none;
+}
+.ctrl-btn {
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.ctrl-btn:active { background: #e8e8e8; }
+#hint {
+  position: fixed;
+  bottom: 80px; left: 0; right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #ccc;
+  pointer-events: none;
+  transition: opacity 1s;
+}
+</style>
+</head>
+<body>
+
+<div id="canvas-area"></div>
+<div id="hint">움직이면 흩어져요 · 3초 멈추면 다시 모여요</div>
+
+<div id="controls">
+  <input id="text-input" type="text" value="TILT TYPE" maxlength="30" placeholder="텍스트 입력" autocomplete="off" />
+  <button class="ctrl-btn" id="apply-btn">적용</button>
+  <button class="ctrl-btn" id="motion-btn">📱기울기</button>
+</div>
+
+<script>
+const canvas    = document.getElementById('canvas-area');
+const input     = document.getElementById('text-input');
+const applyBtn  = document.getElementById('apply-btn');
+const motionBtn = document.getElementById('motion-btn');
+const hint      = document.getElementById('hint');
+
+let letters = [];
+let gx = 0, gy = 0.4;
+let tgx = 0, tgy = 0.4;
+let isIdle = false;
+let idleTimer = null;
+let usingMotion = false;
+let fontSize = 48;
+
+const IDLE_MS  = 3000;
+const SPRING_K = 0.09;
+const SPRING_D = 0.74;
+
+function canvasW() { return canvas.offsetWidth; }
+function canvasH() { return canvas.offsetHeight; }
+
+function calcFontSize(text) {
+  const cw = canvasW();
+  const natural = cw / Math.max(text.length, 1) / 0.62;
+  return Math.min(Math.max(Math.round(natural * 0.75), 22), 100);
+}
+
+function homePositions(text, fs) {
+  const cw = canvasW(), ch = canvasH();
+  const charW = fs * 0.62;
+  const totalW = text.length * charW;
+  const sx = Math.max(4, (cw - totalW) / 2);
+  const sy = (ch - fs) / 2;
+  return text.split('').map((_, i) => ({ x: sx + i * charW, y: sy }));
+}
+
+function spawn(text, scatter) {
+  canvas.querySelectorAll('.letter').forEach(e => e.remove());
+  letters = [];
+  fontSize = calcFontSize(text);
+  const homes = homePositions(text, fontSize);
+  const cw = canvasW(), ch = canvasH();
+
+  text.split('').forEach((c, i) => {
+    const el = document.createElement('div');
+    el.className = 'letter';
+    el.textContent = c === ' ' ? '\u00A0' : c;
+    el.style.fontSize = fontSize + 'px';
+    canvas.appendChild(el);
+
+    const hx = homes[i].x, hy = homes[i].y;
+    const x = scatter ? Math.random() * Math.max(cw - fontSize * 0.6, 1) : hx;
+    const y = scatter ? Math.random() * Math.max(ch - fontSize, 1) : hy;
+    const vx = scatter ? (Math.random() - 0.5) * 5 : 0;
+    const vy = scatter ? (Math.random() - 0.5) * 5 : 0;
+
+    letters.push({ el, x, y, vx, vy, hx, hy, mass: 0.85 + Math.random() * 0.3 });
+    el.style.left = x + 'px';
+    el.style.top  = y + 'px';
+  });
+
+  hint.style.opacity = '1';
+  setTimeout(() => { hint.style.opacity = '0'; }, 3000);
+}
+
+function startIdle() {
+  clearTimeout(idleTimer);
+  isIdle = false;
+  idleTimer = setTimeout(() => { isIdle = true; }, IDLE_MS);
+}
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+(function tick() {
+  const cw = canvasW(), ch = canvasH();
+  gx += (tgx - gx) * 0.07;
+  gy += (tgy - gy) * 0.07;
+
+  letters.forEach(l => {
+    if (isIdle) {
+      l.vx = l.vx * SPRING_D + (l.hx - l.x) * SPRING_K;
+      l.vy = l.vy * SPRING_D + (l.hy - l.y) * SPRING_K;
+    } else {
+      l.vx = (l.vx + gx * 0.5 / l.mass) * 0.87;
+      l.vy = (l.vy + gy * 0.5 / l.mass) * 0.87;
+    }
+    l.x += l.vx;
+    l.y += l.vy;
+    const fw = fontSize * 0.6, fh = fontSize;
+    if (l.x < 0)       { l.x = 0;       l.vx *= -0.4; }
+    if (l.x > cw - fw) { l.x = cw - fw; l.vx *= -0.4; }
+    if (l.y < 0)       { l.y = 0;       l.vy *= -0.4; }
+    if (l.y > ch - fh) { l.y = ch - fh; l.vy *= -0.4; }
+    l.el.style.left = l.x + 'px';
+    l.el.style.top  = l.y + 'px';
+  });
+  requestAnimationFrame(tick);
+})();
+
+canvas.addEventListener('mousemove', e => {
+  if (usingMotion) return;
+  const r = canvas.getBoundingClientRect();
+  tgx = (e.clientX - r.left - r.width  / 2) / r.width  * 2;
+  tgy = (e.clientY - r.top  - r.height / 2) / r.height * 2;
+  startIdle();
+});
+
+canvas.addEventListener('touchmove', e => {
+  if (usingMotion) return;
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect(), t = e.touches[0];
+  tgx = (t.clientX - r.left - r.width  / 2) / r.width  * 2;
+  tgy = (t.clientY - r.top  - r.height / 2) / r.height * 2;
+  startIdle();
+}, { passive: false });
+
+applyBtn.addEventListener('click', () => {
+  const text = input.value.trim() || 'TILT TYPE';
+  spawn(text, true);
+  startIdle();
+  input.blur();
+});
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const text = input.value.trim() || 'TILT TYPE';
+    spawn(text, true);
+    startIdle();
+    input.blur();
+  }
+});
+
+function enableMotion() {
+  usingMotion = true;
+  motionBtn.textContent = '📱ON';
+  window.addEventListener('deviceorientation', e => {
+    const nx = clamp((e.gamma || 0) / 40, -1, 1);
+    const ny = clamp(((e.beta || 0) - 30) / 40, -1, 1);
+    if (Math.abs(nx - tgx) + Math.abs(ny - tgy) > 0.015) startIdle();
+    tgx = nx; tgy = ny;
+  });
+}
+
+motionBtn.addEventListener('click', () => {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(r => { if (r === 'granted') enableMotion(); })
+      .catch(() => {});
+  } else {
+    enableMotion();
+  }
+});
+
+window.addEventListener('resize', () => {
+  spawn(input.value.trim() || 'TILT TYPE', false);
+});
+
+spawn('TILT TYPE', true);
+startIdle();
+</script>
+</body>
+</html>
