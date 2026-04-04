@@ -15,15 +15,17 @@ html, body {
 @media (prefers-color-scheme: dark) {
   html, body { background: #111; }
   .letter { color: #f0f0f0; }
-  #controls { background: #1a1a1a; border-top-color: #333; }
+  #panel { background: #1a1a1a; border-top-color: #333; }
   #text-input { background: #222; color: #f0f0f0; border-color: #444; }
   .ctrl-btn { background: #222; color: #ccc; border-color: #444; }
-  #hint { color: #555; }
+  .ctrl-btn:active { background: #333; }
+  #pw-box { background: #1e1e1e; border-color: #333; }
+  #pw-input { background: #2a2a2a; color: #f0f0f0; border-color: #444; }
+  #pw-label { color: #eee; }
 }
 #canvas-area {
   position: fixed;
-  top: 0; left: 0; right: 0;
-  bottom: 72px;
+  top: 0; left: 0; right: 0; bottom: 0;
   overflow: hidden;
 }
 .letter {
@@ -34,13 +36,19 @@ html, body {
   pointer-events: none;
   line-height: 1;
 }
-#controls {
+#panel {
+  display: none;
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  height: 72px;
-  padding: 10px 12px;
+  padding: 12px;
   border-top: 1px solid #e0e0e0;
   background: #f5f5f5;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+#panel.open { display: flex; }
+#panel-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -70,71 +78,174 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 .ctrl-btn:active { background: #e8e8e8; }
-#hint {
-  position: fixed;
-  bottom: 80px; left: 0; right: 0;
-  text-align: center;
+#panel-close {
+  align-self: flex-end;
   font-size: 12px;
-  color: #ccc;
-  pointer-events: none;
-  transition: opacity 1s;
+  color: #aaa;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
 }
+#pw-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+#pw-overlay.show { display: flex; }
+#pw-box {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 16px;
+  padding: 28px 24px 20px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#pw-label { font-size: 15px; font-weight: 600; color: #222; text-align: center; }
+#pw-input {
+  font-size: 16px;
+  padding: 9px 12px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #fff;
+  color: #111;
+  outline: none;
+  text-align: center;
+  letter-spacing: 4px;
+  -webkit-appearance: none;
+}
+#pw-input:focus { border-color: #888; }
+#pw-submit {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+}
+#pw-submit:active { background: #333; }
+#pw-error { font-size: 12px; color: #e44; text-align: center; min-height: 16px; }
+#pw-cancel { font-size: 13px; color: #aaa; background: none; border: none; cursor: pointer; text-align: center; }
 </style>
 </head>
 <body>
 
 <div id="canvas-area"></div>
-<div id="hint">움직이면 흩어져요 · 3초 멈추면 다시 모여요</div>
 
-<div id="controls">
-  <input id="text-input" type="text" value="TILT TYPE" maxlength="30" placeholder="텍스트 입력" autocomplete="off" />
-  <button class="ctrl-btn" id="apply-btn">적용</button>
-  <button class="ctrl-btn" id="motion-btn">📱기울기</button>
+<div id="panel">
+  <button id="panel-close">닫기 ✕</button>
+  <div id="panel-row">
+    <input id="text-input" type="text" value="TILT TYPE" maxlength="30"
+           placeholder="텍스트 입력" autocomplete="off" />
+    <button class="ctrl-btn" id="apply-btn">적용</button>
+    <button class="ctrl-btn" id="scatter-btn">흩뿌리기</button>
+  </div>
+</div>
+
+<div id="pw-overlay">
+  <div id="pw-box">
+    <div id="pw-label">편집 모드</div>
+    <input id="pw-input" type="password" inputmode="numeric"
+           placeholder="비밀번호" maxlength="20" />
+    <div id="pw-error"></div>
+    <button id="pw-submit">확인</button>
+    <button id="pw-cancel">취소</button>
+  </div>
 </div>
 
 <script>
-const canvas    = document.getElementById('canvas-area');
-const input     = document.getElementById('text-input');
-const applyBtn  = document.getElementById('apply-btn');
-const motionBtn = document.getElementById('motion-btn');
-const hint      = document.getElementById('hint');
+/* ── 설정 ── */
+const PASSWORD = '1234';   // ← 비밀번호 변경
+const IDLE_MS  = 60000;    // 1분
 
-let letters = [];
-let gx = 0, gy = 0.4;
-let tgx = 0, tgy = 0.4;
-let isIdle = false;
-let idleTimer = null;
-let usingMotion = false;
-let fontSize = 48;
+/* 움직임 물리 */
+const GRAVITY_SCALE = 1.1;   // 높을수록 기울기 감도↑
+const FRICTION      = 0.80;  // 낮을수록 빠르게 가속/감속
+const TILT_DIVISOR  = 28;    // 낮을수록 기울기 감도↑
 
-const IDLE_MS  = 3000;
-const SPRING_K = 0.09;
-const SPRING_D = 0.74;
+/* 복귀 스프링 (매우 천천히) */
+const SPRING_K = 0.004;   // 낮을수록 느리게 모임
+const SPRING_D = 0.97;    // 높을수록 감속 없이 오래 움직임
 
-function canvasW() { return canvas.offsetWidth; }
-function canvasH() { return canvas.offsetHeight; }
+/* ── 요소 ── */
+const canvas     = document.getElementById('canvas-area');
+const input      = document.getElementById('text-input');
+const applyBtn   = document.getElementById('apply-btn');
+const scatterBtn = document.getElementById('scatter-btn');
+const panel      = document.getElementById('panel');
+const panelClose = document.getElementById('panel-close');
+const pwOverlay  = document.getElementById('pw-overlay');
+const pwInput    = document.getElementById('pw-input');
+const pwSubmit   = document.getElementById('pw-submit');
+const pwCancel   = document.getElementById('pw-cancel');
+const pwError    = document.getElementById('pw-error');
 
-function calcFontSize(text) {
-  const cw = canvasW();
-  const natural = cw / Math.max(text.length, 1) / 0.62;
-  return Math.min(Math.max(Math.round(natural * 0.75), 22), 100);
+/* ── 상태 ── */
+let letters = [], gx = 0, gy = 0.5, tgx = 0, tgy = 0.5;
+let isIdle = false, idleTimer = null, usingMotion = false, fontSize = 48;
+
+/* ── 탭 5번 → 편집 패널 ── */
+let tapCount = 0, tapTimer = null;
+canvas.addEventListener('click', () => {
+  tapCount++;
+  clearTimeout(tapTimer);
+  tapTimer = setTimeout(() => { tapCount = 0; }, 600);
+  if (tapCount >= 5) { tapCount = 0; openPw(); }
+});
+
+function openPw() {
+  pwInput.value = ''; pwError.textContent = '';
+  pwOverlay.classList.add('show');
+  setTimeout(() => pwInput.focus(), 100);
+}
+function closePw() { pwOverlay.classList.remove('show'); }
+
+function tryPw() {
+  if (pwInput.value === PASSWORD) {
+    closePw();
+    panel.classList.add('open');
+  } else {
+    pwError.textContent = '비밀번호가 틀렸어요.';
+    pwInput.value = '';
+    pwInput.focus();
+  }
 }
 
-function homePositions(text, fs) {
-  const cw = canvasW(), ch = canvasH();
+pwSubmit.addEventListener('click', tryPw);
+pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryPw(); });
+pwCancel.addEventListener('click', closePw);
+panelClose.addEventListener('click', () => panel.classList.remove('open'));
+
+/* ── 물리 ── */
+function cw() { return canvas.offsetWidth; }
+function ch() { return canvas.offsetHeight; }
+
+function calcFs(text) {
+  const natural = cw() / Math.max(text.length, 1) / 0.62;
+  return Math.min(Math.max(Math.round(natural * 0.75), 22), 120);
+}
+
+function homes(text, fs) {
   const charW = fs * 0.62;
-  const totalW = text.length * charW;
-  const sx = Math.max(4, (cw - totalW) / 2);
-  const sy = (ch - fs) / 2;
+  const sx = Math.max(4, (cw() - text.length * charW) / 2);
+  const sy = (ch() - fs) / 2;
   return text.split('').map((_, i) => ({ x: sx + i * charW, y: sy }));
 }
 
 function spawn(text, scatter) {
   canvas.querySelectorAll('.letter').forEach(e => e.remove());
   letters = [];
-  fontSize = calcFontSize(text);
-  const homes = homePositions(text, fontSize);
-  const cw = canvasW(), ch = canvasH();
+  fontSize = calcFs(text);
+  const hs = homes(text, fontSize);
+  const W = cw(), H = ch();
 
   text.split('').forEach((c, i) => {
     const el = document.createElement('div');
@@ -142,20 +253,15 @@ function spawn(text, scatter) {
     el.textContent = c === ' ' ? '\u00A0' : c;
     el.style.fontSize = fontSize + 'px';
     canvas.appendChild(el);
-
-    const hx = homes[i].x, hy = homes[i].y;
-    const x = scatter ? Math.random() * Math.max(cw - fontSize * 0.6, 1) : hx;
-    const y = scatter ? Math.random() * Math.max(ch - fontSize, 1) : hy;
-    const vx = scatter ? (Math.random() - 0.5) * 5 : 0;
-    const vy = scatter ? (Math.random() - 0.5) * 5 : 0;
-
+    const hx = hs[i].x, hy = hs[i].y;
+    const x  = scatter ? Math.random() * Math.max(W - fontSize * 0.6, 1) : hx;
+    const y  = scatter ? Math.random() * Math.max(H - fontSize, 1)       : hy;
+    const vx = scatter ? (Math.random() - 0.5) * 6 : 0;
+    const vy = scatter ? (Math.random() - 0.5) * 6 : 0;
     letters.push({ el, x, y, vx, vy, hx, hy, mass: 0.85 + Math.random() * 0.3 });
     el.style.left = x + 'px';
     el.style.top  = y + 'px';
   });
-
-  hint.style.opacity = '1';
-  setTimeout(() => { hint.style.opacity = '0'; }, 3000);
 }
 
 function startIdle() {
@@ -167,31 +273,31 @@ function startIdle() {
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
 (function tick() {
-  const cw = canvasW(), ch = canvasH();
-  gx += (tgx - gx) * 0.07;
-  gy += (tgy - gy) * 0.07;
+  const W = cw(), H = ch();
+  gx += (tgx - gx) * 0.06;
+  gy += (tgy - gy) * 0.06;
 
   letters.forEach(l => {
     if (isIdle) {
       l.vx = l.vx * SPRING_D + (l.hx - l.x) * SPRING_K;
       l.vy = l.vy * SPRING_D + (l.hy - l.y) * SPRING_K;
     } else {
-      l.vx = (l.vx + gx * 0.5 / l.mass) * 0.87;
-      l.vy = (l.vy + gy * 0.5 / l.mass) * 0.87;
+      l.vx = (l.vx + gx * GRAVITY_SCALE / l.mass) * FRICTION;
+      l.vy = (l.vy + gy * GRAVITY_SCALE / l.mass) * FRICTION;
     }
-    l.x += l.vx;
-    l.y += l.vy;
+    l.x += l.vx; l.y += l.vy;
     const fw = fontSize * 0.6, fh = fontSize;
-    if (l.x < 0)       { l.x = 0;       l.vx *= -0.4; }
-    if (l.x > cw - fw) { l.x = cw - fw; l.vx *= -0.4; }
-    if (l.y < 0)       { l.y = 0;       l.vy *= -0.4; }
-    if (l.y > ch - fh) { l.y = ch - fh; l.vy *= -0.4; }
+    if (l.x < 0)      { l.x = 0;      l.vx *= -0.4; }
+    if (l.x > W - fw) { l.x = W - fw; l.vx *= -0.4; }
+    if (l.y < 0)      { l.y = 0;      l.vy *= -0.4; }
+    if (l.y > H - fh) { l.y = H - fh; l.vy *= -0.4; }
     l.el.style.left = l.x + 'px';
     l.el.style.top  = l.y + 'px';
   });
   requestAnimationFrame(tick);
 })();
 
+/* ── 마우스 ── */
 canvas.addEventListener('mousemove', e => {
   if (usingMotion) return;
   const r = canvas.getBoundingClientRect();
@@ -209,44 +315,48 @@ canvas.addEventListener('touchmove', e => {
   startIdle();
 }, { passive: false });
 
-applyBtn.addEventListener('click', () => {
-  const text = input.value.trim() || 'TILT TYPE';
-  spawn(text, true);
-  startIdle();
-  input.blur();
-});
-
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    const text = input.value.trim() || 'TILT TYPE';
-    spawn(text, true);
-    startIdle();
-    input.blur();
-  }
-});
-
+/* ── 기울기 자동 활성화 ── */
 function enableMotion() {
   usingMotion = true;
-  motionBtn.textContent = '📱ON';
   window.addEventListener('deviceorientation', e => {
-    const nx = clamp((e.gamma || 0) / 40, -1, 1);
-    const ny = clamp(((e.beta || 0) - 30) / 40, -1, 1);
-    if (Math.abs(nx - tgx) + Math.abs(ny - tgy) > 0.015) startIdle();
+    const nx = clamp((e.gamma || 0) / TILT_DIVISOR, -1.5, 1.5);
+    const ny = clamp(((e.beta  || 0) - 30) / TILT_DIVISOR, -1.5, 1.5);
+    if (Math.abs(nx - tgx) + Math.abs(ny - tgy) > 0.01) startIdle();
     tgx = nx; tgy = ny;
   });
 }
 
-motionBtn.addEventListener('click', () => {
+let motionRequested = false;
+function requestMotionOnce() {
+  if (motionRequested) return;
+  motionRequested = true;
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     DeviceOrientationEvent.requestPermission()
       .then(r => { if (r === 'granted') enableMotion(); })
       .catch(() => {});
-  } else {
+  } else if (typeof DeviceOrientationEvent !== 'undefined') {
     enableMotion();
   }
-});
+}
+document.addEventListener('touchstart', requestMotionOnce, { once: true });
+document.addEventListener('click',      requestMotionOnce, { once: true });
 
+/* ── 편집 ── */
+applyBtn.addEventListener('click', () => {
+  spawn(input.value.trim() || 'TILT TYPE', true);
+  startIdle(); input.blur();
+});
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    spawn(input.value.trim() || 'TILT TYPE', true);
+    startIdle(); input.blur();
+  }
+});
+scatterBtn.addEventListener('click', () => {
+  spawn(input.value.trim() || 'TILT TYPE', true);
+  startIdle();
+});
 window.addEventListener('resize', () => {
   spawn(input.value.trim() || 'TILT TYPE', false);
 });
