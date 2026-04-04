@@ -22,6 +22,7 @@ html, body {
   #pw-box { background: #1e1e1e; border-color: #333; }
   #pw-input { background: #2a2a2a; color: #f0f0f0; border-color: #444; }
   #pw-label { color: #eee; }
+  #touch-prompt { color: #777; }
 }
 #canvas-area {
   position: fixed;
@@ -36,6 +37,22 @@ html, body {
   pointer-events: none;
   line-height: 1;
 }
+
+/* 터치 유도 화면 */
+#touch-prompt {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #777777;
+  z-index: 30;
+  pointer-events: none;
+  transition: opacity 0.6s;
+}
+#touch-prompt.hidden { opacity: 0; }
+
 #panel {
   display: none;
   position: fixed;
@@ -140,16 +157,21 @@ html, body {
 
 <div id="canvas-area"></div>
 
+<!-- 터치 유도 -->
+<div id="touch-prompt">화면을 터치해 주세요</div>
+
+<!-- 편집 패널 -->
 <div id="panel">
   <button id="panel-close">닫기 ✕</button>
   <div id="panel-row">
-    <input id="text-input" type="text" value="TILT TYPE" maxlength="30"
+    <input id="text-input" type="text" value="URLucky" maxlength="30"
            placeholder="텍스트 입력" autocomplete="off" />
     <button class="ctrl-btn" id="apply-btn">적용</button>
     <button class="ctrl-btn" id="scatter-btn">흩뿌리기</button>
   </div>
 </div>
 
+<!-- 비밀번호 -->
 <div id="pw-overlay">
   <div id="pw-box">
     <div id="pw-label">편집 모드</div>
@@ -163,34 +185,42 @@ html, body {
 
 <script>
 /* ── 설정 ── */
-const PASSWORD = '1234';   // ← 비밀번호 변경
-const IDLE_MS  = 60000;    // 1분
-
-/* 움직임 물리 */
-const GRAVITY_SCALE = 1.1;   // 높을수록 기울기 감도↑
-const FRICTION      = 0.80;  // 낮을수록 빠르게 가속/감속
-const TILT_DIVISOR  = 28;    // 낮을수록 기울기 감도↑
-
-/* 복귀 스프링 (매우 천천히) */
-const SPRING_K = 0.004;   // 낮을수록 느리게 모임
-const SPRING_D = 0.97;    // 높을수록 감속 없이 오래 움직임
+const PASSWORD     = '1234';
+const DISPLAY_TEXT = 'URLucky';
+const IDLE_MS      = 60000;
+const GRAVITY_SCALE = 1.1;
+const FRICTION      = 0.80;
+const TILT_DIVISOR  = 28;
+const SPRING_K      = 0.004;
+const SPRING_D      = 0.97;
 
 /* ── 요소 ── */
-const canvas     = document.getElementById('canvas-area');
-const input      = document.getElementById('text-input');
-const applyBtn   = document.getElementById('apply-btn');
-const scatterBtn = document.getElementById('scatter-btn');
-const panel      = document.getElementById('panel');
-const panelClose = document.getElementById('panel-close');
-const pwOverlay  = document.getElementById('pw-overlay');
-const pwInput    = document.getElementById('pw-input');
-const pwSubmit   = document.getElementById('pw-submit');
-const pwCancel   = document.getElementById('pw-cancel');
-const pwError    = document.getElementById('pw-error');
+const canvas      = document.getElementById('canvas-area');
+const input       = document.getElementById('text-input');
+const applyBtn    = document.getElementById('apply-btn');
+const scatterBtn  = document.getElementById('scatter-btn');
+const panel       = document.getElementById('panel');
+const panelClose  = document.getElementById('panel-close');
+const pwOverlay   = document.getElementById('pw-overlay');
+const pwInput     = document.getElementById('pw-input');
+const pwSubmit    = document.getElementById('pw-submit');
+const pwCancel    = document.getElementById('pw-cancel');
+const pwError     = document.getElementById('pw-error');
+const touchPrompt = document.getElementById('touch-prompt');
 
 /* ── 상태 ── */
 let letters = [], gx = 0, gy = 0.5, tgx = 0, tgy = 0.5;
 let isIdle = false, idleTimer = null, usingMotion = false, fontSize = 48;
+let started = false;
+
+/* ── 애너그램 셔플 ── */
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 /* ── 탭 5번 → 편집 패널 ── */
 let tapCount = 0, tapTimer = null;
@@ -207,18 +237,15 @@ function openPw() {
   setTimeout(() => pwInput.focus(), 100);
 }
 function closePw() { pwOverlay.classList.remove('show'); }
-
 function tryPw() {
   if (pwInput.value === PASSWORD) {
     closePw();
     panel.classList.add('open');
   } else {
     pwError.textContent = '비밀번호가 틀렸어요.';
-    pwInput.value = '';
-    pwInput.focus();
+    pwInput.value = ''; pwInput.focus();
   }
 }
-
 pwSubmit.addEventListener('click', tryPw);
 pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryPw(); });
 pwCancel.addEventListener('click', closePw);
@@ -233,19 +260,27 @@ function calcFs(text) {
   return Math.min(Math.max(Math.round(natural * 0.75), 22), 120);
 }
 
-function homes(text, fs) {
+function homePositions(text, fs) {
   const charW = fs * 0.62;
   const sx = Math.max(4, (cw() - text.length * charW) / 2);
   const sy = (ch() - fs) / 2;
   return text.split('').map((_, i) => ({ x: sx + i * charW, y: sy }));
 }
 
-function spawn(text, scatter) {
+function spawn(text, mode) {
+  // mode: 'anagram' | 'scatter' | 'home'
   canvas.querySelectorAll('.letter').forEach(e => e.remove());
   letters = [];
   fontSize = calcFs(text);
-  const hs = homes(text, fontSize);
+  const hs = homePositions(text, fontSize);
   const W = cw(), H = ch();
+
+  // 애너그램 모드: home 위치를 섞어서 배치 (글자는 올바른 글자, 위치만 섞음)
+  let assignedPositions;
+  if (mode === 'anagram') {
+    const shuffledHomes = shuffle([...hs]);
+    assignedPositions = shuffledHomes;
+  }
 
   text.split('').forEach((c, i) => {
     const el = document.createElement('div');
@@ -253,11 +288,27 @@ function spawn(text, scatter) {
     el.textContent = c === ' ' ? '\u00A0' : c;
     el.style.fontSize = fontSize + 'px';
     canvas.appendChild(el);
+
     const hx = hs[i].x, hy = hs[i].y;
-    const x  = scatter ? Math.random() * Math.max(W - fontSize * 0.6, 1) : hx;
-    const y  = scatter ? Math.random() * Math.max(H - fontSize, 1)       : hy;
-    const vx = scatter ? (Math.random() - 0.5) * 6 : 0;
-    const vy = scatter ? (Math.random() - 0.5) * 6 : 0;
+    let x, y, vx = 0, vy = 0;
+
+    if (mode === 'anagram') {
+      // 홈 위치를 섞어서 배치 + 약간의 랜덤 오프셋
+      x = assignedPositions[i].x + (Math.random() - 0.5) * fontSize * 1.5;
+      y = assignedPositions[i].y + (Math.random() - 0.5) * H * 0.4;
+      x = Math.max(0, Math.min(W - fontSize * 0.6, x));
+      y = Math.max(0, Math.min(H - fontSize, y));
+      vx = (Math.random() - 0.5) * 3;
+      vy = (Math.random() - 0.5) * 3;
+    } else if (mode === 'scatter') {
+      x = Math.random() * Math.max(W - fontSize * 0.6, 1);
+      y = Math.random() * Math.max(H - fontSize, 1);
+      vx = (Math.random() - 0.5) * 6;
+      vy = (Math.random() - 0.5) * 6;
+    } else {
+      x = hx; y = hy;
+    }
+
     letters.push({ el, x, y, vx, vy, hx, hy, mass: 0.85 + Math.random() * 0.3 });
     el.style.left = x + 'px';
     el.style.top  = y + 'px';
@@ -315,7 +366,7 @@ canvas.addEventListener('touchmove', e => {
   startIdle();
 }, { passive: false });
 
-/* ── 기울기 자동 활성화 ── */
+/* ── 기울기 ── */
 function enableMotion() {
   usingMotion = true;
   window.addEventListener('deviceorientation', e => {
@@ -326,10 +377,14 @@ function enableMotion() {
   });
 }
 
-let motionRequested = false;
-function requestMotionOnce() {
-  if (motionRequested) return;
-  motionRequested = true;
+/* ── 첫 터치: 프롬프트 숨기고 기울기 활성화 ── */
+function onFirstTouch() {
+  if (started) return;
+  started = true;
+
+  touchPrompt.classList.add('hidden');
+  setTimeout(() => { touchPrompt.style.display = 'none'; }, 700);
+
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     DeviceOrientationEvent.requestPermission()
@@ -338,31 +393,38 @@ function requestMotionOnce() {
   } else if (typeof DeviceOrientationEvent !== 'undefined') {
     enableMotion();
   }
-}
-document.addEventListener('touchstart', requestMotionOnce, { once: true });
-document.addEventListener('click',      requestMotionOnce, { once: true });
 
-/* ── 편집 ── */
+  startIdle();
+}
+
+document.addEventListener('touchstart', onFirstTouch, { once: true });
+document.addEventListener('click',      onFirstTouch, { once: true });
+
+/* ── 편집 패널 ── */
 applyBtn.addEventListener('click', () => {
-  spawn(input.value.trim() || 'TILT TYPE', true);
+  const text = input.value.trim() || DISPLAY_TEXT;
+  spawn(text, 'scatter');
   startIdle(); input.blur();
 });
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
-    spawn(input.value.trim() || 'TILT TYPE', true);
+    const text = input.value.trim() || DISPLAY_TEXT;
+    spawn(text, 'scatter');
     startIdle(); input.blur();
   }
 });
 scatterBtn.addEventListener('click', () => {
-  spawn(input.value.trim() || 'TILT TYPE', true);
+  spawn(input.value.trim() || DISPLAY_TEXT, 'scatter');
   startIdle();
 });
 window.addEventListener('resize', () => {
-  spawn(input.value.trim() || 'TILT TYPE', false);
+  spawn(input.value.trim() || DISPLAY_TEXT, 'home');
 });
 
-spawn('TILT TYPE', true);
-startIdle();
+/* ── 시작: 애너그램으로 배치, 물리는 바로 작동 ── */
+spawn(DISPLAY_TEXT, 'anagram');
+// 첫 터치 전까지는 기본 중력만 살짝 적용
+tgy = 0.4;
 </script>
 </body>
 </html>
