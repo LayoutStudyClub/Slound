@@ -28,6 +28,10 @@ html, body {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   overflow: hidden;
+  visibility: hidden;
+}
+#canvas-area.revealed {
+  visibility: visible;
 }
 .letter {
   position: absolute;
@@ -375,7 +379,8 @@ function onFirstTouch() {
   touchPrompt.classList.add('hidden');
   setTimeout(() => { touchPrompt.style.display = 'none'; }, 700);
 
-  // 글자 무작위 겹쳐서 등장
+  // canvas 보이게 하고 글자 무작위 겹쳐서 등장
+  canvas.classList.add('revealed');
   revealScattered(input.value.trim() || DISPLAY_TEXT);
 
   // 기울기 권한 요청
