@@ -36,9 +36,11 @@ html, body {
   user-select: none;
   pointer-events: none;
   line-height: 1;
+  opacity: 0;
+  transition: opacity 0.4s;
 }
+.letter.visible { opacity: 1; }
 
-/* 터치 유도 화면 */
 #touch-prompt {
   position: fixed;
   inset: 0;
@@ -65,88 +67,49 @@ html, body {
   z-index: 10;
 }
 #panel.open { display: flex; }
-#panel-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+#panel-row { display: flex; align-items: center; gap: 8px; }
 #text-input {
-  flex: 1;
-  min-width: 0;
-  font-size: 16px;
-  padding: 8px 10px;
-  border: 1px solid #ccc;
-  border-radius: 10px;
-  background: #fff;
-  color: #111;
-  outline: none;
-  -webkit-appearance: none;
+  flex: 1; min-width: 0;
+  font-size: 16px; padding: 8px 10px;
+  border: 1px solid #ccc; border-radius: 10px;
+  background: #fff; color: #111;
+  outline: none; -webkit-appearance: none;
 }
 .ctrl-btn {
-  font-size: 13px;
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  border-radius: 10px;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
+  font-size: 13px; padding: 8px 12px;
+  border: 1px solid #ccc; border-radius: 10px;
+  background: #fff; color: #333;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
 }
 .ctrl-btn:active { background: #e8e8e8; }
 #panel-close {
-  align-self: flex-end;
-  font-size: 12px;
-  color: #aaa;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
+  align-self: flex-end; font-size: 12px; color: #aaa;
+  background: none; border: none; cursor: pointer; padding: 0;
 }
 #pw-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
+  display: none; position: fixed; inset: 0;
   background: rgba(0,0,0,0.45);
-  align-items: center;
-  justify-content: center;
-  z-index: 20;
+  align-items: center; justify-content: center; z-index: 20;
 }
 #pw-overlay.show { display: flex; }
 #pw-box {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 16px;
-  padding: 28px 24px 20px;
-  width: 280px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 16px;
+  padding: 28px 24px 20px; width: 280px;
+  display: flex; flex-direction: column; gap: 12px;
 }
 #pw-label { font-size: 15px; font-weight: 600; color: #222; text-align: center; }
 #pw-input {
-  font-size: 16px;
-  padding: 9px 12px;
-  border: 1px solid #ccc;
-  border-radius: 10px;
-  background: #fff;
-  color: #111;
-  outline: none;
-  text-align: center;
-  letter-spacing: 4px;
-  -webkit-appearance: none;
+  font-size: 16px; padding: 9px 12px;
+  border: 1px solid #ccc; border-radius: 10px;
+  background: #fff; color: #111; outline: none;
+  text-align: center; letter-spacing: 4px; -webkit-appearance: none;
 }
 #pw-input:focus { border-color: #888; }
 #pw-submit {
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px;
-  border: none;
-  border-radius: 10px;
-  background: #111;
-  color: #fff;
-  cursor: pointer;
+  font-size: 14px; font-weight: 600; padding: 10px;
+  border: none; border-radius: 10px;
+  background: #111; color: #fff; cursor: pointer;
 }
 #pw-submit:active { background: #333; }
 #pw-error { font-size: 12px; color: #e44; text-align: center; min-height: 16px; }
@@ -156,11 +119,8 @@ html, body {
 <body>
 
 <div id="canvas-area"></div>
-
-<!-- 터치 유도 -->
 <div id="touch-prompt">화면을 터치해 주세요</div>
 
-<!-- 편집 패널 -->
 <div id="panel">
   <button id="panel-close">닫기 ✕</button>
   <div id="panel-row">
@@ -171,7 +131,6 @@ html, body {
   </div>
 </div>
 
-<!-- 비밀번호 -->
 <div id="pw-overlay">
   <div id="pw-box">
     <div id="pw-label">편집 모드</div>
@@ -185,9 +144,9 @@ html, body {
 
 <script>
 /* ── 설정 ── */
-const PASSWORD     = '1234';
-const DISPLAY_TEXT = 'URLucky';
-const IDLE_MS      = 60000;
+const PASSWORD      = '1234';
+const DISPLAY_TEXT  = 'URLucky';
+const IDLE_MS       = 60000;
 const GRAVITY_SCALE = 1.1;
 const FRICTION      = 0.80;
 const TILT_DIVISOR  = 28;
@@ -209,18 +168,9 @@ const pwError     = document.getElementById('pw-error');
 const touchPrompt = document.getElementById('touch-prompt');
 
 /* ── 상태 ── */
-let letters = [], gx = 0, gy = 0.5, tgx = 0, tgy = 0.5;
+let letters = [], gx = 0, gy = 0.4, tgx = 0, tgy = 0.4;
 let isIdle = false, idleTimer = null, usingMotion = false, fontSize = 48;
 let started = false;
-
-/* ── 애너그램 셔플 ── */
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
 
 /* ── 탭 5번 → 편집 패널 ── */
 let tapCount = 0, tapTimer = null;
@@ -239,8 +189,7 @@ function openPw() {
 function closePw() { pwOverlay.classList.remove('show'); }
 function tryPw() {
   if (pwInput.value === PASSWORD) {
-    closePw();
-    panel.classList.add('open');
+    closePw(); panel.classList.add('open');
   } else {
     pwError.textContent = '비밀번호가 틀렸어요.';
     pwInput.value = ''; pwInput.focus();
@@ -267,24 +216,71 @@ function homePositions(text, fs) {
   return text.split('').map((_, i) => ({ x: sx + i * charW, y: sy }));
 }
 
-function spawn(text, mode) {
-  // mode: 'anagram' | 'scatter' | 'home'
+/* 터치 전: 글자 생성하되 보이지 않게 */
+function spawnHidden(text) {
   canvas.querySelectorAll('.letter').forEach(e => e.remove());
   letters = [];
   fontSize = calcFs(text);
   const hs = homePositions(text, fontSize);
   const W = cw(), H = ch();
 
-  // 애너그램 모드: home 위치를 섞어서 배치 (글자는 올바른 글자, 위치만 섞음)
-  let assignedPositions;
-  if (mode === 'anagram') {
-    const shuffledHomes = shuffle([...hs]);
-    assignedPositions = shuffledHomes;
-  }
-
   text.split('').forEach((c, i) => {
     const el = document.createElement('div');
     el.className = 'letter';
+    el.textContent = c === ' ' ? '\u00A0' : c;
+    el.style.fontSize = fontSize + 'px';
+    // opacity: 0 상태로 홈 위치에 대기
+    canvas.appendChild(el);
+
+    const hx = hs[i].x, hy = hs[i].y;
+    letters.push({ el, x: hx, y: hy, vx: 0, vy: 0, hx, hy, mass: 0.85 + Math.random() * 0.3 });
+    el.style.left = hx + 'px';
+    el.style.top  = hy + 'px';
+  });
+}
+
+/* 터치 후: 무작위 위치+겹침으로 흩뿌리고 보이게 */
+function revealScattered(text) {
+  fontSize = calcFs(text);
+  const hs = homePositions(text, fontSize);
+  const W = cw(), H = ch();
+  const cx = W / 2, cy = H / 2;
+
+  // 인덱스를 섞어서 등장 순서 무작위화
+  const order = letters.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  order.forEach((idx, rank) => {
+    const l = letters[idx];
+    // 화면 중앙 근처에 몰려서 겹치게 시작
+    const x = cx + (Math.random() - 0.5) * W * 0.5;
+    const y = cy + (Math.random() - 0.5) * H * 0.4;
+    l.x = x; l.y = y;
+    l.vx = (Math.random() - 0.5) * 8;
+    l.vy = (Math.random() - 0.5) * 8;
+    l.el.style.left = x + 'px';
+    l.el.style.top  = y + 'px';
+
+    // 순서대로 시차를 두고 페이드인
+    setTimeout(() => {
+      l.el.classList.add('visible');
+    }, rank * 60);
+  });
+}
+
+function spawn(text, mode) {
+  canvas.querySelectorAll('.letter').forEach(e => e.remove());
+  letters = [];
+  fontSize = calcFs(text);
+  const hs = homePositions(text, fontSize);
+  const W = cw(), H = ch();
+
+  text.split('').forEach((c, i) => {
+    const el = document.createElement('div');
+    el.className = 'letter visible';
     el.textContent = c === ' ' ? '\u00A0' : c;
     el.style.fontSize = fontSize + 'px';
     canvas.appendChild(el);
@@ -292,19 +288,12 @@ function spawn(text, mode) {
     const hx = hs[i].x, hy = hs[i].y;
     let x, y, vx = 0, vy = 0;
 
-    if (mode === 'anagram') {
-      // 홈 위치를 섞어서 배치 + 약간의 랜덤 오프셋
-      x = assignedPositions[i].x + (Math.random() - 0.5) * fontSize * 1.5;
-      y = assignedPositions[i].y + (Math.random() - 0.5) * H * 0.4;
-      x = Math.max(0, Math.min(W - fontSize * 0.6, x));
-      y = Math.max(0, Math.min(H - fontSize, y));
-      vx = (Math.random() - 0.5) * 3;
-      vy = (Math.random() - 0.5) * 3;
-    } else if (mode === 'scatter') {
-      x = Math.random() * Math.max(W - fontSize * 0.6, 1);
-      y = Math.random() * Math.max(H - fontSize, 1);
-      vx = (Math.random() - 0.5) * 6;
-      vy = (Math.random() - 0.5) * 6;
+    if (mode === 'scatter') {
+      const cx = W / 2, cy = H / 2;
+      x = cx + (Math.random() - 0.5) * W * 0.5;
+      y = cy + (Math.random() - 0.5) * H * 0.4;
+      vx = (Math.random() - 0.5) * 8;
+      vy = (Math.random() - 0.5) * 8;
     } else {
       x = hx; y = hy;
     }
@@ -377,14 +366,19 @@ function enableMotion() {
   });
 }
 
-/* ── 첫 터치: 프롬프트 숨기고 기울기 활성화 ── */
+/* ── 첫 터치 ── */
 function onFirstTouch() {
   if (started) return;
   started = true;
 
+  // 프롬프트 숨기기
   touchPrompt.classList.add('hidden');
   setTimeout(() => { touchPrompt.style.display = 'none'; }, 700);
 
+  // 글자 무작위 겹쳐서 등장
+  revealScattered(input.value.trim() || DISPLAY_TEXT);
+
+  // 기울기 권한 요청
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     DeviceOrientationEvent.requestPermission()
@@ -403,28 +397,23 @@ document.addEventListener('click',      onFirstTouch, { once: true });
 /* ── 편집 패널 ── */
 applyBtn.addEventListener('click', () => {
   const text = input.value.trim() || DISPLAY_TEXT;
-  spawn(text, 'scatter');
-  startIdle(); input.blur();
+  spawn(text, 'scatter'); startIdle(); input.blur();
 });
 input.addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     const text = input.value.trim() || DISPLAY_TEXT;
-    spawn(text, 'scatter');
-    startIdle(); input.blur();
+    spawn(text, 'scatter'); startIdle(); input.blur();
   }
 });
 scatterBtn.addEventListener('click', () => {
-  spawn(input.value.trim() || DISPLAY_TEXT, 'scatter');
-  startIdle();
+  spawn(input.value.trim() || DISPLAY_TEXT, 'scatter'); startIdle();
 });
 window.addEventListener('resize', () => {
   spawn(input.value.trim() || DISPLAY_TEXT, 'home');
 });
 
-/* ── 시작: 애너그램으로 배치, 물리는 바로 작동 ── */
-spawn(DISPLAY_TEXT, 'anagram');
-// 첫 터치 전까지는 기본 중력만 살짝 적용
-tgy = 0.4;
+/* ── 시작: 글자 숨긴 채로 대기 ── */
+spawnHidden(DISPLAY_TEXT);
 </script>
 </body>
 </html>
